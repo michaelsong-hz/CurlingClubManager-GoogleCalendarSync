@@ -1,0 +1,7 @@
+version: "3.9"
+services:
+  ccm-sync:
+    build: .
+    volumes:
+      - ./token:/app/token
+    restart: unless-stopped

@@ -1,0 +1,2 @@
+* */6 * * * cd /app && python main.py
+@reboot cd /app && python main.py

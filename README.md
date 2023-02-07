@@ -1,5 +1,5 @@
 # CurlingClubManager Google Calendar Sync
-This application automatically syncs your upcoming games from CCM to your Google Calendar. It also automatically adds information about the team matchup in the event description.
+This application automatically syncs your upcoming games from curling clubs using [Curling Club Manager](https://curlingclubmanager.com/) to Google Calendar. It also automatically adds information about the team matchup in the event description.
 
 From this:
 ![Screenshot 2023-02-06 222518](https://user-images.githubusercontent.com/16067442/217140945-ae710c3d-4f28-4494-b2ce-372e75f20879.png)

@@ -30,3 +30,13 @@ Run
 docker-compose up -d
 ```
 to bring up the application. By default, it will sync every 6 hours. You can edit the frequency in the `crontab`.
+
+## License
+
+CurlingClubManager-CalendarSync is licensed under the GNU General Public License. See `NOTICE.md` and `LICENSE.md` in the root of this repository.
+
+![image](https://www.gnu.org/graphics/gplv3-with-text-136x68.png)
+
+## Contact
+
+You can reach me at <hello@michaelsong.me>.

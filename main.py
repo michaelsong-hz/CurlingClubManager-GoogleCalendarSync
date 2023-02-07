@@ -17,11 +17,7 @@ class Google():
     def __init__(self, config):
         self.config = config
 
-    @staticmethod
-    def _authenticate():
-        """
-        Creates authorized Google account credentials
-        """
+        # Create authorized Google account credentials
         creds = None
         # The file token.json stores the user"s access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
@@ -38,13 +34,11 @@ class Google():
             else:
                 # TODO: Report an error
                 print("Credentials aren't valid - rerun get_c_acc_token.py")
-        return creds
+        self.service = build(
+            "calendar", "v3", credentials=creds)
 
     def get_cal_matches(self):
         try:
-            self.service = build(
-                "calendar", "v3", credentials=self._authenticate())
-
             now = datetime.utcnow().isoformat() + "Z"  # "Z" indicates UTC time
             events_result = self.service.events().list(calendarId=self.config["g_cal_id"], timeMin=now,
                                                        maxResults=50, singleEvents=True,
@@ -108,6 +102,47 @@ class Google():
         print("Updated {}".format(start_time.isoformat()))
 
 
+def fill_ccm_team(soup: BeautifulSoup, ccm_matches: dict):
+    teams = dict()
+    for team in soup.find("tbody").find_all("tr"):
+        index = 0
+        skip = ""
+        for team_member_row in team.find_all("td"):
+            if index == 0:
+                pass
+            elif index == 1:
+                skip = team_member_row.text.strip()
+                teams[skip] = [skip]
+            else:
+                team_member = team_member_row.text.strip()
+                if team_member:
+                    teams[skip].append(team_member)
+            index += 1
+    for ccm_match in ccm_matches:
+        for skip in ccm_match["skips"]:
+            if skip in teams:
+                team_description_text = ""
+                for team_member in teams[skip]:
+                    team_description_text += "\n" + team_member
+                ccm_match["description"] += "\n\nTeam {}:{}".format(
+                    skip.split(", ")[0], team_description_text)
+
+
+def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: dict, ccm_leagues: dict):
+    response = session.get(
+        config["ccm_url"] + "index.php/member-s-home/league-information/teams-schedules-standings?view=tss", headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+    for league_row in soup.find("table").find_all("tr"):
+        league = league_row.find("td", valign="top").string.strip()
+        if league in ccm_leagues:
+            team_href = league_row.find("a", text="Teams")
+            if team_href:
+                team_response = session.get(
+                    config["ccm_url"] + team_href["href"][1:], headers=headers)
+                team_soup = BeautifulSoup(team_response.text, "html.parser")
+                fill_ccm_team(team_soup, ccm_leagues[league])
+
+
 def convert_ccm_matches(league_tables):
     leagues = dict()
     for league in league_tables.find_all("table"):
@@ -145,7 +180,8 @@ def convert_ccm_matches(league_tables):
 
                 leagues[league_name].append({
                     "datetime": match_datetime,
-                    "description": "{}\n{}".format(match_matchup, match_sheet)
+                    "description": "{}\n{}".format(match_matchup, match_sheet),
+                    "skips": match_matchup.split(" vs ")
                 })
     return leagues
 
@@ -202,7 +238,10 @@ def get_ccm_matches(config: dict):
     for post in soup.find_all("div", class_="post_intro"):
         try:
             if post.find("h2", itemprop="name").a.string.strip() == "My Next Games":
-                return convert_ccm_matches(post)
+                ccm_leagues = convert_ccm_matches(post)
+                if ccm_leagues:
+                    fill_ccm_teams(session, headers, config, ccm_leagues)
+                return ccm_leagues
         except AttributeError as e:
             print("Error finding attribute in post: {}".format(e))
 
@@ -263,8 +302,8 @@ def main():
     config = load(open("config.json"))
     google = Google(config)
     ccm_leagues = get_ccm_matches(config) or dict()
-    cal_leagues = google.get_cal_matches()
     if ccm_leagues:
+        cal_leagues = google.get_cal_matches()
         update_calendar(google, ccm_leagues, cal_leagues)
         print("{} Calendar sync successful".format(datetime.now().isoformat()))
     else:

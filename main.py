@@ -1,6 +1,7 @@
-from os import path
 from datetime import datetime, timedelta
 from json import load
+from os import path
+from sys import exit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -14,6 +15,7 @@ G_ACC_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 class Google():
+    _sync_changes = []
     def __init__(self, config):
         self.config = config
 
@@ -32,8 +34,10 @@ class Google():
                 with open("./token/token.json", "w") as token:
                     token.write(creds.to_json())
             else:
-                # TODO: Report an error
-                print("Credentials aren't valid - rerun get_c_acc_token.py")
+                message = "Credentials aren't valid - rerun get_c_acc_token.py"
+                print(message)
+                update_home_assistant(config, message, success=False)
+                exit(1)
         self.service = build(
             "calendar", "v3", credentials=creds)
 
@@ -47,7 +51,8 @@ class Google():
 
         except HttpError as error:
             print("An error occurred: %s" % error)
-            return dict()
+            update_home_assistant(self.config, "Error retrieving Google calendar", success=False)
+            exit(1)
 
         if not events:
             print("No upcoming events found.")
@@ -88,19 +93,32 @@ class Google():
         event = self._generate_cal_event(title, description, start_time)
         self.service.events().insert(
             calendarId=self.config["g_cal_id"], body=event).execute()
-        print("Inserted {}".format(start_time.isoformat()))
+        change = "Added {}".format(start_time.isoformat())
+        print(change)
+        self._sync_changes.append(change)
 
     def delete_cal_match(self, event_id: str, start_time: datetime):
         self.service.events().delete(
             calendarId=self.config["g_cal_id"], eventId=event_id).execute()
-        print("Deleted {}".format(start_time.isoformat()))
+        change = "Removed {}".format(start_time.isoformat())
+        print(change)
+        self._sync_changes.append(change)
 
     def update_cal_match(self, event_id: str, title: str, description: str, start_time: datetime):
         event = self._generate_cal_event(title, description, start_time)
         self.service.events().update(calendarId=self.config["g_cal_id"],
                                      eventId=event_id, body=event).execute()
-        print("Updated {}".format(start_time.isoformat()))
+        change = "Updated {}".format(start_time.isoformat())
+        print(change)
+        self._sync_changes.append(change)
 
+    def get_changes(self) -> str:
+        sync_changes = ""
+        for change in self._sync_changes:
+            sync_changes = sync_changes + ", " + change
+        if sync_changes:
+            sync_changes = sync_changes[:-2]
+        return sync_changes
 
 def fill_ccm_team(soup: BeautifulSoup, ccm_matches: dict):
     teams = dict()
@@ -208,6 +226,8 @@ def get_ccm_matches(config: dict):
                 request_body_final_value = input_form["name"]
         except KeyError as e:
             print("Error finding key in input form: {}".format(e))
+            update_home_assistant(config, "Error logging in to CCM", success=False)
+            exit(1)
 
     # Login
     request_body = {
@@ -231,8 +251,8 @@ def get_ccm_matches(config: dict):
     response = session.get(
         config["ccm_url"] + "index.php/member-s-home/member-information/my-next-games", headers=headers)
     if response.status_code != 200:
-        # TODO: report error
-        print("big sad")
+        update_home_assistant(config, "Invalid CCM credentials", success=False)
+        exit(1)
 
     soup = BeautifulSoup(response.text, "html.parser")
     for post in soup.find_all("div", class_="post_intro"):
@@ -244,6 +264,8 @@ def get_ccm_matches(config: dict):
                 return ccm_leagues
         except AttributeError as e:
             print("Error finding attribute in post: {}".format(e))
+            update_home_assistant(config, "Unable to parse next games", success=False)
+            exit(1)
 
 
 def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):
@@ -297,6 +319,28 @@ def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):
             )
             ccm_index += 1
 
+def update_home_assistant(config: dict, message: str, success: bool):
+    if config["ha_url"]:
+        url = config["ha_url"] + "/api/states/sensor.ccm_sync_status"
+        headers = {
+            "Authorization": "Bearer " + config["ha_token"],
+            "content-type": "application/json",
+        }
+
+        state = "Failure"
+        if success:
+            state = "Success"
+
+        request_json = {
+            "state": state,
+            "attributes": {
+                "update_time": datetime.now().isoformat()
+            }
+        }
+        if message:
+            request_json["attributes"]["message"] = message
+
+        requests.post(url, headers=headers, json=request_json)
 
 def main():
     config = load(open("config.json"))
@@ -306,9 +350,10 @@ def main():
         cal_leagues = google.get_cal_matches()
         update_calendar(google, ccm_leagues, cal_leagues)
         print("{} Calendar sync successful".format(datetime.now().isoformat()))
+        update_home_assistant(config, google.get_changes(), success=True)
     else:
         print("{} No upcoming matches found - skipped calendar sync".format(datetime.now().isoformat()))
-
+        update_home_assistant(config, "No upcoming matches found - skipped calendar sync", success=True)
 
 if __name__ == "__main__":
     main()

@@ -153,7 +153,7 @@ def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: d
     for league_row in soup.find("table").find_all("tr"):
         league = league_row.find("td", valign="top").string.strip()
         if league in ccm_leagues:
-            team_href = league_row.find("a", text="Teams")
+            team_href = league_row.find("a", string="Teams")
             if team_href:
                 team_response = session.get(
                     config["ccm_url"] + team_href["href"][1:], headers=headers)

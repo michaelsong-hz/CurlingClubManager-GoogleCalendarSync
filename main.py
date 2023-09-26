@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from enum import Enum
 from json import load
 from os import path
 from sys import exit
@@ -13,9 +14,14 @@ from googleapiclient.errors import HttpError
 
 G_ACC_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
+class ChangeType(Enum):
+    ADDITION = 1
+    DELETION = 2
+    UPDATE = 3
+
 
 class Google():
-    _sync_changes = []
+    _sync_changes = {}
     def __init__(self, config):
         self.config = config
 
@@ -89,35 +95,67 @@ class Google():
             },
         }
 
+    def _add_sync_change(self, league: str, change_type: ChangeType):
+        if league not in self._sync_changes:
+            self._sync_changes[league] = {
+                ChangeType.ADDITION.name: 0,
+                ChangeType.DELETION.name: 0,
+                ChangeType.UPDATE.name: 0
+            }
+        if change_type == ChangeType.ADDITION:
+            self._sync_changes[league][ChangeType.ADDITION.name] += 1
+        if change_type == ChangeType.DELETION:
+            self._sync_changes[league][ChangeType.DELETION.name] += 1
+        if change_type == ChangeType.UPDATE:
+            self._sync_changes[league][ChangeType.UPDATE.name] += 1
+
     def create_cal_match(self, title: str, description: str, start_time: datetime):
         event = self._generate_cal_event(title, description, start_time)
         self.service.events().insert(
             calendarId=self.config["g_cal_id"], body=event).execute()
-        change = "Added {}".format(start_time.isoformat())
-        print(change)
-        self._sync_changes.append(change)
+        print("Added {} {}".format(title, start_time.isoformat()))
+        self._add_sync_change(title, ChangeType.ADDITION)
 
-    def delete_cal_match(self, event_id: str, start_time: datetime):
+    def delete_cal_match(self, event_id: str, title: str, start_time: datetime):
         self.service.events().delete(
             calendarId=self.config["g_cal_id"], eventId=event_id).execute()
-        change = "Removed {}".format(start_time.isoformat())
-        print(change)
-        self._sync_changes.append(change)
+        print("Removed {} {}".format(title, start_time.isoformat()))
+        self._add_sync_change(title, ChangeType.DELETION)
 
     def update_cal_match(self, event_id: str, title: str, description: str, start_time: datetime):
         event = self._generate_cal_event(title, description, start_time)
         self.service.events().update(calendarId=self.config["g_cal_id"],
                                      eventId=event_id, body=event).execute()
-        change = "Updated {}".format(start_time.isoformat())
-        print(change)
-        self._sync_changes.append(change)
+        print("Updated {} {}".format(title, start_time.isoformat()))
+        self._add_sync_change(title, ChangeType.UPDATE)
+
+    def _get_changes_format(self, change_type: ChangeType, num_changes: int) -> str:
+        game_string = "games"
+        if num_changes == 1:
+            game_string = "game"
+        change_string = ""
+        if change_type == ChangeType.ADDITION:
+            change_string = "added"
+        elif change_type == ChangeType.DELETION:
+            change_string = "deleted"
+        elif change_type == ChangeType.UPDATE:
+            change_string = "updated"
+        return "{} {} {}, ".format(num_changes, game_string, change_string)
 
     def get_changes(self) -> str:
         sync_changes = ""
-        for change in self._sync_changes:
-            sync_changes = sync_changes + ", " + change
-        if sync_changes:
+        for league in self._sync_changes:
+            sync_changes += "{}: ".format(league)
+            if self._sync_changes[league][ChangeType.ADDITION.name]:
+                sync_changes += self._get_changes_format(ChangeType.ADDITION, self._sync_changes[league][ChangeType.ADDITION.name])
+            if self._sync_changes[league][ChangeType.DELETION.name]:
+                sync_changes += self._get_changes_format(ChangeType.DELETION, self._sync_changes[league][ChangeType.DELETION.name])
+            if self._sync_changes[league][ChangeType.UPDATE.name]:
+                sync_changes += self._get_changes_format(ChangeType.UPDATE, self._sync_changes[league][ChangeType.UPDATE.name])
             sync_changes = sync_changes[:-2]
+            sync_changes += ". "
+        if sync_changes:
+            sync_changes = sync_changes[:-1]
         return sync_changes
 
 def fill_ccm_team(soup: BeautifulSoup, ccm_matches: dict):
@@ -161,46 +199,46 @@ def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: d
                 fill_ccm_team(team_soup, ccm_leagues[league])
 
 
-def convert_ccm_matches(league_tables):
+def convert_ccm_matches(next_games):
     leagues = dict()
-    for league in league_tables.find_all("table"):
-        league_name = ""
-        for i, match in enumerate(league.find_all("tr")):
-            if i == 0:
-                league_name = match.td.string.strip()
+    league_name = ""
+    for i, match in enumerate(next_games.find("table").find_all("tr")):
+        if i % 2 == 0:
+            league_name = match.td.string.strip()
+        else:
+            match_date = ""
+            match_time = ""
+            match_matchup = ""
+            match_sheet = ""
+            for j, row in enumerate(match.find_all("td")):
+                match j:
+                    case 1:
+                        match_date = row.string.strip()
+                    case 2:
+                        match_time = row.string.strip()
+                    case 3:
+                        match_matchup = row.string.strip()
+                    case 4:
+                        match_sheet = row.string.strip()
+                    case _:
+                        # Row 0 contains nothing
+                        pass
+
+            # Pad hour with 0
+            if len(match_time) == 7:
+                match_time = "0" + match_time
+            match_datetime = datetime.strptime(
+                match_date + " " + match_time, "%m/%d/%Y %I:%M %p")
+            match_datetime = match_datetime.replace(
+                tzinfo=ZoneInfo("America/Toronto"))
+
+            if league_name not in leagues:
                 leagues[league_name] = []
-            else:
-                match_date = ""
-                match_time = ""
-                match_matchup = ""
-                match_sheet = ""
-                for j, row in enumerate(match.find_all("td")):
-                    match j:
-                        case 1:
-                            match_date = row.string.strip()
-                        case 2:
-                            match_time = row.string.strip()
-                        case 3:
-                            match_matchup = row.string.strip()
-                        case 4:
-                            match_sheet = row.string.strip()
-                        case _:
-                            # Row 0 contains nothing
-                            pass
-
-                # Pad hour with 0
-                if len(match_time) == 7:
-                    match_time = "0" + match_time
-                match_datetime = datetime.strptime(
-                    match_date + " " + match_time, "%m/%d/%Y %I:%M %p")
-                match_datetime = match_datetime.replace(
-                    tzinfo=ZoneInfo("America/Toronto"))
-
-                leagues[league_name].append({
-                    "datetime": match_datetime,
-                    "description": "{}\n{}".format(match_matchup, match_sheet),
-                    "skips": match_matchup.split(" vs ")
-                })
+            leagues[league_name].append({
+                "datetime": match_datetime,
+                "description": "{}\n{}".format(match_matchup, match_sheet),
+                "skips": match_matchup.split(" vs ")
+            })
     return leagues
 
 
@@ -218,7 +256,7 @@ def get_ccm_matches(config: dict):
 
     request_body_return = ""
     request_body_final_value = ""
-    for input_form in soup.find("form", id="login-form").find_all("input", type="hidden"):
+    for input_form in soup.find("form", id="login-form-16").find_all("input", type="hidden"):
         try:
             if input_form["name"] == "return":
                 request_body_return = input_form["name"]
@@ -255,9 +293,9 @@ def get_ccm_matches(config: dict):
         exit(1)
 
     soup = BeautifulSoup(response.text, "html.parser")
-    for post in soup.find_all("div", class_="post_intro"):
+    for post in soup.find_all("div", class_="above-component"):
         try:
-            if post.find("h2", itemprop="name").a.string.strip() == "My Next Games":
+            if post.find("h3").string.strip() == "My Next Games":
                 ccm_leagues = convert_ccm_matches(post)
                 if ccm_leagues:
                     fill_ccm_teams(session, headers, config, ccm_leagues)
@@ -292,7 +330,7 @@ def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):
                 elif ccm_date > cal_date:
                     # Delete from calendar
                     google.delete_cal_match(
-                        event_id=cal_match["event_id"], start_time=ccm_match["datetime"])
+                        event_id=cal_match["event_id"], title=league, start_time=ccm_match["datetime"])
                     cal_index += 1
                 elif ccm_date < cal_date:
                     # Add to calendar

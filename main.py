@@ -202,8 +202,8 @@ def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: d
 def convert_ccm_matches(next_games):
     leagues = dict()
     league_name = ""
-    for i, match in enumerate(next_games.find("table").find_all("tr")):
-        if i % 2 == 0:
+    for _, match in enumerate(next_games.find("table").find_all("tr")):
+        if match.td.string:
             league_name = match.td.string.strip()
         else:
             match_date = ""

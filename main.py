@@ -345,7 +345,7 @@ def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):
                 # Delete excess from calendar
                 cal_match = cal_leagues[league][cal_index]
                 google.delete_cal_match(
-                    event_id=cal_match["event_id"], start_time=ccm_match["datetime"])
+                    event_id=cal_match["event_id"], title=league, start_time=ccm_match["datetime"])
                 cal_index += 1
         while len(ccm_leagues[league]) > ccm_index:
             # Add remaining to calendar

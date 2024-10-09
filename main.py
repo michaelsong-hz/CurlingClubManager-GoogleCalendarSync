@@ -333,12 +333,14 @@ def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):
                         event_id=cal_match["event_id"], title=league, start_time=ccm_match["datetime"])
                     cal_index += 1
                 elif ccm_date < cal_date:
-                    # Add to calendar
-                    google.create_cal_match(
-                        title=league,
-                        description=ccm_match["description"],
-                        start_time=ccm_match["datetime"]
-                    )
+                    # Only add the game if the game start time is after the current time
+                    if ccm_date >= datetime.now(ZoneInfo("America/Toronto")):
+                        # Add to calendar
+                        google.create_cal_match(
+                            title=league,
+                            description=ccm_match["description"],
+                            start_time=ccm_match["datetime"]
+                        )
                     ccm_index += 1
 
             while len(cal_leagues[league]) > cal_index:

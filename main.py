@@ -186,7 +186,7 @@ def fill_ccm_team(soup: BeautifulSoup, ccm_matches: dict):
 
 def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: dict, ccm_leagues: dict):
     response = session.get(
-        config["ccm_url"] + "index.php/member-s-home/league-information/teams-schedules-standings?view=tss", headers=headers)
+        config["ccm_url"] + "/index.php/member-s-home/league-information/teams-schedules-standings?view=tss", headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
     for league_row in soup.find("table").find_all("tr"):
         league = league_row.find("td", valign="top").string.strip()
@@ -194,35 +194,37 @@ def fill_ccm_teams(session: requests.Session, headers: dict[str, str], config: d
             team_href = league_row.find("a", string="Teams")
             if team_href:
                 team_response = session.get(
-                    config["ccm_url"] + team_href["href"][1:], headers=headers)
+                    config["ccm_url"] + team_href["href"], headers=headers)
                 team_soup = BeautifulSoup(team_response.text, "html.parser")
                 fill_ccm_team(team_soup, ccm_leagues[league])
 
 
-def convert_ccm_matches(next_games):
-    leagues = dict()
-    league_name = ""
-    for _, match in enumerate(next_games.find("table").find_all("tr")):
-        if match.td.string:
-            league_name = match.td.string.strip()
-        else:
-            match_date = ""
-            match_time = ""
-            match_matchup = ""
-            match_sheet = ""
-            for j, row in enumerate(match.find_all("td")):
-                match j:
+def convert_ccm_matches(session, headers, config, leagues, ccm_leagues):
+    for league_name in leagues:
+        response = session.get(config["ccm_url"] + leagues[league_name]["link"], headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        first_row = True
+        for schedule_row in soup.find("table", id="schedule").find_all("tr"):
+            if first_row:
+                first_row = False
+                continue
+            i = 0
+            for schedule_col in schedule_row.find_all("td"):
+                match i:
                     case 1:
-                        match_date = row.string.strip()
+                        match_date = schedule_col.text.strip()
                     case 2:
-                        match_time = row.string.strip()
+                        match_time = schedule_col.text.strip()
                     case 3:
-                        match_matchup = row.string.strip()
+                        match_sheet = schedule_col.text.strip()
                     case 4:
-                        match_sheet = row.string.strip()
+                        match_opp = schedule_col.text.strip()
+                    case 5:
+                        match_result = schedule_col.text.strip()
                     case _:
-                        # Row 0 contains nothing
                         pass
+                i += 1
 
             # Pad hour with 0
             if len(match_time) == 7:
@@ -232,14 +234,11 @@ def convert_ccm_matches(next_games):
             match_datetime = match_datetime.replace(
                 tzinfo=ZoneInfo("America/Toronto"))
 
-            if league_name not in leagues:
-                leagues[league_name] = []
-            leagues[league_name].append({
+            ccm_leagues[league_name].append({
                 "datetime": match_datetime,
-                "description": "{}\n{}".format(match_matchup, match_sheet),
-                "skips": match_matchup.split(" vs ")
+                "description": "{} vs {}\nSheet {}\n{}".format(match_opp, leagues[league_name]["skip"], match_sheet, match_result),
+                "skips": [match_opp, leagues[league_name]["skip"]]
             })
-    return leagues
 
 
 def get_header_cookie(cookies: dict):
@@ -287,23 +286,41 @@ def get_ccm_matches(config: dict):
     cookie = get_header_cookie(session.cookies.get_dict())
     headers = {"Cookie": cookie + "; joomla_user_state=logged_in"}
     response = session.get(
-        config["ccm_url"] + "index.php/member-s-home/member-information/my-next-games", headers=headers)
+        config["ccm_url"] + "/index.php/component/curling/?view=my_teams", headers=headers)
     if response.status_code != 200:
         update_home_assistant(config, "Invalid CCM credentials", success=False)
         exit(1)
 
+    leagues = {}
+    ccm_leagues = {}
+    league_names = []
     soup = BeautifulSoup(response.text, "html.parser")
-    for post in soup.find_all("div", class_="above-component"):
-        try:
-            if post.find("h3").string.strip() == "My Next Games":
-                ccm_leagues = convert_ccm_matches(post)
-                if ccm_leagues:
-                    fill_ccm_teams(session, headers, config, ccm_leagues)
-                return ccm_leagues
-        except AttributeError as e:
-            print("Error finding attribute in post: {}".format(e))
-            update_home_assistant(config, "Unable to parse next games", success=False)
-            exit(1)
+    league_div = None
+    for league_name in soup.find("table", id="roster").parent.find_all("h2"):
+        if not league_div:
+            league_div = league_name.parent
+        league_name = league_name.text
+
+        leagues[league_name] = {
+            "link": "",
+            "skip": "",
+        }
+        ccm_leagues[league_name] = []
+        league_names.append(league_name)
+    i = 0
+    for post in league_div.find_all("table", id="roster"):
+        leagues[league_names[i]]["skip"] = post.find("tbody").find("td").text
+        i += 1
+    i = 0
+    for post in league_div.find_all("a", string="Team Schedule and Results Summary"):
+        leagues[league_names[i]]["link"] = post["href"]
+        i += 1
+
+    convert_ccm_matches(session, headers, config, leagues, ccm_leagues)
+    if ccm_leagues:
+        fill_ccm_teams(session, headers, config, ccm_leagues)
+
+    return ccm_leagues
 
 
 def update_calendar(google: Google, ccm_leagues: dict, cal_leagues: dict):

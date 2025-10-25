@@ -220,8 +220,6 @@ def convert_ccm_matches(session, headers, config, leagues, ccm_leagues):
                         match_sheet = schedule_col.text.strip()
                     case 4:
                         match_opp = schedule_col.text.strip()
-                    case 5:
-                        match_result = schedule_col.text.strip()
                     case _:
                         pass
                 i += 1
@@ -236,7 +234,7 @@ def convert_ccm_matches(session, headers, config, leagues, ccm_leagues):
 
             ccm_leagues[league_name].append({
                 "datetime": match_datetime,
-                "description": "{} vs {}\nSheet {}\n{}".format(match_opp, leagues[league_name]["skip"], match_sheet, match_result),
+                "description": "{} vs {}\nSheet {}".format(match_opp, leagues[league_name]["skip"], match_sheet),
                 "skips": [match_opp, leagues[league_name]["skip"]]
             })
 

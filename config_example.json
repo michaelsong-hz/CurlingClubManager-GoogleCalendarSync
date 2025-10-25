@@ -1,7 +1,7 @@
 {
 	"ccm_username": "kevin",
 	"ccm_password": "hunter2",
-	"ccm_url": "https://curlingclub.com/",
+	"ccm_url": "https://curlingclub.com",
 	"g_cal_id": "abc123@group.calendar.google.com",
 	"match_location": "Curling Club\n123 Sesame Street, New York City, NY, USA",
 	"match_duration_hours": 2,

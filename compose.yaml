@@ -1,5 +1,7 @@
 services:
   ccm-sync:
+    dns:
+      - 1.1.1.1
     build: .
     volumes:
       - ./token:/app/token
